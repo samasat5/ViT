@@ -29,7 +29,7 @@ class AttentionHead(nn.Module):
         output = self.dropout(output)
         return output, attention_prob
         
-class MultiHeadAttention(nn.Module):  # used inside Transformerencoder 
+class MultiHeadAttention(nn.Module):  
     def __init__(self, embed_dim, num_attention_heads, dropout_rate, bias=False):
         super().__init__()
         self.attention_head_size = embed_dim // num_attention_heads
