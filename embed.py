@@ -11,7 +11,7 @@ class PatchEmbedding(nn.Module):
         self.patch_size = patch_size
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.num_patches = (image_size // patch_size) ** 2
+        self.num_patches = (image_size // patch_size) ** 2  #TODO: check if we agree on assuming a square image
         self.projection = nn.Conv2d(in_channels, 
                                     out_channels, 
                                     kernel_size=patch_size, stride=patch_size)
