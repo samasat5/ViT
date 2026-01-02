@@ -5,6 +5,9 @@ __pycache__/
 *.pyd
 .ipynb_checkpoints/
 
+# ---- files ----
+patch_emb_playing.py
+
 # ---- Virtual env ----
 venv/
 .env/

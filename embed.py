@@ -11,7 +11,9 @@ class PatchEmbedding(nn.Module):
         self.patch_size = patch_size
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.num_patches = (image_size // patch_size) ** 2  #TODO: check if we agree on assuming a square image
+        self.h, self.w = image_size
+        # self.num_patches = (image_size // patch_size) ** 2  #TODO: check if we agree on assuming a square image
+        self.num_patches = (self.h // patch_size) * (self.w // patch_size)
         self.projection = nn.Conv2d(in_channels, 
                                     out_channels, 
                                     kernel_size=patch_size, stride=patch_size)
@@ -37,7 +39,7 @@ class PatchPositionEmbeddings(nn.Module):
         cls = self.cls_token.expand(x.shape[0], -1, -1) 
         x = torch.cat((cls, x), dim=1)
         x = x + self.position_embeddings
-        x = self.dropout(x) # shape: (batch_size, num_patches+1, embed_dim)
+        x = self.dropout(x) # shape: (batch_size, num_patches+1, embed_dim) = (batch, seq_len, embed_dim)
         return x
 
 

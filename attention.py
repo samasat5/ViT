@@ -62,6 +62,13 @@ class MultiHeadAttention(nn.Module):
         return out 
     
     
+    
+    
+    
+    
+    
+    
+    
 class AugmentedAttentionHead(nn.Module):
     def __init__(self, embed_dim, attention_head_size, dropout_rate, grid_w, grid_h,num_prefix_tokens=1, bias=False):
         super().__init__() # patchedpositioned(x) shape: (batch_size, num_patches+1, embed_dim) = (batch, seq_len, embed_dim)
@@ -127,6 +134,34 @@ class AugmentedAttentionHead(nn.Module):
         output = attention_prob @ value # shape : (batch, seq_len, attention_head_size)
         output = self.dropout(output)
         return output
+
+
+class AugmentedMultiHeadAttention(nn.Module):  
+    def __init__(self, embed_dim, num_attention_heads, dropout_rate, grid_w, grid_h,num_prefix_tokens=1, bias=False):
+        super().__init__()
+        self.attention_head_size = embed_dim // num_attention_heads
+        self.heads = nn.ModuleList([
+            AugmentedAttentionHead(embed_dim, self.attention_head_size, dropout_rate, grid_w, grid_h,num_prefix_tokens=num_prefix_tokens, bias=bias)
+            for _ in range(num_attention_heads)]) 
+        self.out = nn.Linear(num_attention_heads * self.attention_head_size, embed_dim)
+        self.dropout = nn.Dropout(dropout_rate)
+    def forward(self, x):
+        attention_outputs = [head(x) for head in self.heads] 
+        # attention_outputs = [
+                #     ( (B, T, d), (B, T, T) ),   # head 0; d=attention_head_size, T=seq_len
+                #     ...
+                #     ( (B, T, d), (B, T, T) )    # head H-1 ]
+
+        attn_heads_cat = torch.cat([attention_output for attention_output in attention_outputs], dim=-1)
+        out = self.out(attn_heads_cat) # shape (B, T, H*d) = (B, T, D) = (batch_size, seq_len, embed_dim)
+        out = self.dropout(out)
+        # attention_probs = torch.stack(  # shape: (batch_size, num_attention_heads, seq_len, seq_len)
+        #     [attention_probs for _, attention_probs in attention_outputs], dim=1)
+        return out
+
+
+
+
 
 
 
