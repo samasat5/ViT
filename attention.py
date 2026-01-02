@@ -133,20 +133,6 @@ class AugmentedAttentionHead(nn.Module):
 
 
 
-def patch_to_xy_indices(patch_idx, W, patch_size):
-    grid_w = W // patch_size
-    y = patch_idx // grid_w
-    x = patch_idx % grid_w
-    return y, x
-
-def gaussian_kernel_pq(patch_p_ind, patch_q_ind, sigma, W, patch_size):
-    xp, yp = patch_to_xy_indices(patch_p_ind, W= W, patch_size=patch_size)
-    xq, yq = patch_to_xy_indices(patch_q_ind, W= W, patch_size=patch_size)
-    sigma_x, sigma_y = sigma[...,0], sigma[...,1]  # shape: (batch, seq_len, 1)
-    dist_sq = (xp - xq) ** 2 / 2*sigma_x + (yp - yq) ** 2 / 2*sigma_y
-    gauss = torch.exp(-dist_sq)  # shape: (batch, seq_len, seq_len)
-    return gauss # between [0,1]
-
 
 
 
