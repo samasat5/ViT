@@ -1,49 +1,76 @@
-
-import pdb
 import torch
-from torch import nn
+from torch import nn   
+import torchvision.transforms as transforms    
+from PIL import Image as PILImage
+import matplotlib.pyplot as plt            
 
-
-class PatchEmbedding(nn.Module):
-    def __init__(self, image_size, patch_size, in_channels, out_channels):
+class Embedding(nn.Module): # Patch + Position Embedding # DONE, paper_relevant_code/vision_transformer.py 
+    def __init__(
+        self, 
+        image_size, 
+        patch_size, 
+        in_channels, 
+        dim_embed, 
+        dropout_rate=0,
+    ):
         super().__init__()
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.h, self.w = image_size
-        # self.num_patches = (image_size // patch_size) ** 2  #TODO: check if we agree on assuming a square image
-        self.num_patches = (self.h // patch_size) * (self.w // patch_size)
-        self.projection = nn.Conv2d(in_channels, 
-                                    out_channels, 
-                                    kernel_size=patch_size, stride=patch_size)
+        H, W = image_size
+        num_patches = (H//patch_size) * (W//patch_size)
 
-    def forward(self, x):
-                                       # x shape (batch_size, in_channels, image_size, image_size)
-        x_conv = self.projection(x)            # Shape: (batch_size, out_channels, num_patches_sqrt, num_patches_sqrt)
-        x = x_conv.flatten(2).transpose(1, 2)  # Shape: (batch_size, num_patches, embed_dim)
-        return x                        
-
-class PatchPositionEmbeddings(nn.Module):
-    def __init__(self, num_patches, embed_dim, dropout_rate, image_size, patch_size, in_channels):
-        super().__init__()
-        self.patch_embeddings = PatchEmbedding(
-            image_size=image_size,patch_size=patch_size, in_channels=in_channels, out_channels=embed_dim
+        self.projection = nn.Conv2d(
+            in_channels, dim_embed, 
+            kernel_size=patch_size, stride=patch_size
         )
-        self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim))  # Learnable cls token so it can appear in model.parameters()
-        self.position_embeddings = nn.Parameter(torch.randn(1, num_patches+1, embed_dim)) # Learnable pos emb. so it can appear in model.parameters()
-        self.dropout = nn.Dropout(dropout_rate)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim_embed)) 
+        self.position_embedding = nn.Parameter(torch.randn(1, 1+num_patches, dim_embed)) 
+        self.dropout = nn.Dropout(dropout_rate) # nécessaire? c'est quoi exactement son utilité?
 
     def forward(self, x):
-        x = self.patch_embeddings(x)
-        cls = self.cls_token.expand(x.shape[0], -1, -1) 
+        B, C, H, W = x.shape
+
+        x = self.projection(x)          
+        x = x.flatten(2).transpose(1, 2)
+
+        cls = self.cls_token.expand(B, -1, -1) 
         x = torch.cat((cls, x), dim=1)
-        x = x + self.position_embeddings
-        x = self.dropout(x) # shape: (batch_size, num_patches+1, embed_dim) = (batch, seq_len, embed_dim)
+
+        x = x + self.position_embedding
+        x = self.dropout(x) 
+
         return x
 
 
+if __name__ == "__main__":
 
-    
-    
+    patch_size = 32
+    num_patches = (224 // patch_size) ** 2  
+    emb = Embedding(image_size=(224, 224), patch_size=16, in_channels=3, dim_embed=128)
+
+    # Load and preprocess the image
+    img = PILImage.open('louvre.jpg')  # Load the image
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+    ])
+    img_tensor = transform(img).unsqueeze(0)  # Shape: (1, 3, 224, 224); adding batch dimension
+    patched_img = emb.forward(img_tensor)   # shape: (1, 192, 128)
+    print("patched_image : ", patched_img.shape)
+    first_patch_img = img_tensor[0, :, 120:180, 60:120]
+
+    plt.figure(figsize=(12, 5))
+
+    # Before
+    plt.subplot(1, 2, 1)
+    plt.imshow(img_tensor[0].permute(1, 2, 0).numpy())
+    plt.title('Original Image')
+    plt.axis('off')
+
+    # After - show patch grid visualization
+    plt.subplot(1, 2, 2)
+    plt.imshow(first_patch_img.permute(1, 2, 0).numpy())
+    plt.title('Patch Grid Visualization')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+        
     
