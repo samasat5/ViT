@@ -5,14 +5,16 @@ from PIL import Image as PILImage
 import matplotlib.pyplot as plt            
 
 class Embedding(nn.Module): # Patch + Position Embedding # DONE, paper_relevant_code/vision_transformer.py 
+    
     def __init__(
         self, 
-        image_size, 
-        patch_size, 
-        in_channels, 
-        dim_embed, 
-        dropout_rate=0,
-    ):
+        image_size: tuple, 
+        patch_size: int, 
+        in_channels: int, 
+        dim_embed: int, 
+        dropout_rate: int = 0,
+    ) -> None:
+        
         super().__init__()
         H, W = image_size
         num_patches = (H//patch_size) * (W//patch_size)

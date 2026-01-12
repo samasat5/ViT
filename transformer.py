@@ -13,10 +13,11 @@ class MLP(nn.Module): # DONE, paper_relevant_code/vision_transformer.py
 
     def __init__(
         self, 
-        dim_embed,
-        dim_mlp, 
-        dropout_rate
-    ):
+        dim_embed: int,
+        dim_mlp: int, 
+        dropout_rate: float,
+    ) -> None:
+        
         super().__init__()
         self.denselayer = nn.Linear(dim_embed, dim_mlp)
         self.act = nn.GELU()
@@ -36,10 +37,11 @@ class Norm(nn.Module): # ????
 
     def __init__(
         self, 
-        dim_embed, 
-        gamma_init=1.0,
-        eps=1e-5
-    ): 
+        dim_embed: int, 
+        gamma_init: float = 1.0,
+        eps: float = 1e-5
+    ) -> None: 
+        
         super().__init__()
         self.beta = nn.Parameter(torch.ones(dim_embed))
         self.gamma = nn.Parameter(torch.ones(dim_embed) * gamma_init)
@@ -56,21 +58,23 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
 
     def __init__(
         self, 
-        grid_size, 
-        dim_embed, 
-        dim_mlp, 
-        num_head, 
-        dropout_rate, 
-        bias=False, 
-        gaussian_augment=True
-    ):
+        grid_size: int, 
+        dim_embed: int, 
+        dim_mlp: int, 
+        num_head: int, 
+        dropout_rate: float, 
+        bias: bool = False, 
+        locat: bool = True,
+    ) -> None:
+        
         super().__init__()
         self.norm1 = Norm(dim_embed)
         # num_prefix_tokens?
         self.attn = MultiHeadAttention(
             grid_size, dim_embed, num_head, 
-            dropout_rate, bias, gaussian_augment
+            dropout_rate, bias, locat
         )
+        # droppath
         self.norm2 = Norm(dim_embed)
         self.mlp = MLP(dim_mlp, dim_embed, dropout_rate)
 
@@ -88,20 +92,21 @@ class Transformer(nn.Module): # ajouter PRR
     
     def __init__(
         self,
-        grid_size, 
-        dim_embed, 
-        dim_mlp,
-        num_head,  
-        num_transformer, 
-        dropout_rate,         
-        bias=False, 
-        gaussian_augment=True
-    ):
+        grid_size: int, 
+        dim_embed: int, 
+        dim_mlp: int,
+        num_head: int,  
+        num_transformer: int, 
+        dropout_rate: float,         
+        bias: bool = False, 
+        locat: bool = True
+    ) -> None:
+        
         super().__init__()
         self.layers = nn.ModuleList([
             Encoder(
                 grid_size, dim_embed, dim_mlp, 
-                num_head, dropout_rate, bias, gaussian_augment
+                num_head, dropout_rate, bias, locat
             )
             for _ in range(num_transformer)
         ])
