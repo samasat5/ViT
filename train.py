@@ -1,6 +1,5 @@
 import os
-from dataclasses import dataclass
-from typing import Dict, Tuple
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -9,9 +8,10 @@ from torchvision import datasets, transforms
 from vision_transformer import VisionTransformer
 
 from config import (
-    IMG_H, IMG_W, PATCH_SIZE, CHANNELS, 
+    IMAGE_SIZE, PATCH_SIZE, CHANNELS, 
     NUM_CLASSES, NUM_HEAD, NUM_TRANSFORMER,
-    DIM_EMBED, DIM_MLP, DROPOUT_RATE,
+    DIM_EMBED, DIM_MLP, DROPOUT_RATE, LOCAT,
+    TASK,
 )
 
 
@@ -21,7 +21,7 @@ def train(model, train_loader, optimizer, criterion, device):
     total_correct = 0
     total_samples = 0
 
-    for images, labels in train_loader:
+    for images, labels in tqdm(train_loader):
         images = images.to(device)
         labels = labels.to(device)
 
@@ -93,22 +93,11 @@ if __name__ == '__main__':
 
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     test_loader  = DataLoader(test_dataset,  batch_size=128, shuffle=False)
-    # model = VisionTransformer(
-    #     image_size=32,
-    #     patch_size=4,        # 4×4 patches → 64 patches
-    #     in_channels=3,
-    #     num_classes=10,
-    #     dim_embed=128,
-    #     num_head=4,
-    #     dim_mlp=256,
-    #     num_transformer=6,
-    #     dropout_rate=0.1
-    # )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = VisionTransformer(
-        image_size=(IMG_H, IMG_W),
+        image_size=IMAGE_SIZE,
         patch_size=PATCH_SIZE,
         in_channels=CHANNELS,
         dim_embed=DIM_EMBED,
@@ -117,12 +106,14 @@ if __name__ == '__main__':
         num_head=NUM_HEAD,
         num_transformer=NUM_TRANSFORMER,
         dropout_rate=DROPOUT_RATE,
+        locat=LOCAT,
+        task=TASK,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
 
-    for epoch in range(10):
+    for epoch in tqdm(range(10)):
         train_loss, train_acc = train(model, train_loader, optimizer, criterion, device)
         test_loss, test_acc = test(model, test_loader, criterion, device)
 

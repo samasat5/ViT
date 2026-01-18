@@ -65,18 +65,18 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
         dropout_rate: float, 
         bias: bool = False, 
         locat: bool = True,
+        task: str = "classif",
     ) -> None:
         
         super().__init__()
         self.norm1 = Norm(dim_embed)
-        # num_prefix_tokens?
         self.attn = MultiHeadAttention(
             grid_size, dim_embed, num_head, 
-            dropout_rate, bias, locat
+            dropout_rate, bias, locat, task,
         )
         # droppath
         self.norm2 = Norm(dim_embed)
-        self.mlp = MLP(dim_mlp, dim_embed, dropout_rate)
+        self.mlp = MLP(dim_embed, dim_mlp, dropout_rate)
 
     def forward(self, x):
         norm1 = self.norm1(x)
@@ -99,14 +99,16 @@ class Transformer(nn.Module): # ajouter PRR
         num_transformer: int, 
         dropout_rate: float,         
         bias: bool = False, 
-        locat: bool = True
+        locat: bool = False,
+        task: str = "classif",
     ) -> None:
         
         super().__init__()
+        self.locat = locat
         self.layers = nn.ModuleList([
             Encoder(
                 grid_size, dim_embed, dim_mlp, 
-                num_head, dropout_rate, bias, locat
+                num_head, dropout_rate, bias, locat, task,
             )
             for _ in range(num_transformer)
         ])
@@ -118,7 +120,6 @@ class Transformer(nn.Module): # ajouter PRR
         for layer in self.layers:
             x, attn_probs = layer(x) 
             all_attention_probs.append(attn_probs) # list of length num_transformer, each element shape: (batch_size, num_head, seq_len, seq_len)
-        all_attention_probs = torch.stack(all_attention_probs, dim=1) # (batch_size, num_transformer, num_head, seq_len, seq_len
+        # if not self.locat: all_attention_probs = torch.stack(all_attention_probs, dim=1) # (batch_size, num_transformer, num_head, seq_len, seq_len
         x = self.norm(x)
-
         return x, all_attention_probs # (batch_size, seq_len, dim_embed), (batch_size, num_transformer, num_head, seq_len, seq_len)
