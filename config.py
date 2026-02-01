@@ -7,5 +7,5 @@ NUM_HEAD = 4
 NUM_TRANSFORMER = 6
 NUM_CLASSES = 10
 DROPOUT_RATE = 0.1
-LOCAT = False 
+LOCAT = True
 TASK = "classif"

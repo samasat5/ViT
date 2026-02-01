@@ -11,16 +11,17 @@
     images = images.to(device, non_blocking=True)
     labels = labels.to(device, non_blocking=True)
 
-3. Normalisation CIFAR:
+3. Normalisation CIFAR: **DONE**
     - Pour CIFAR-10, les stats classiques sont :
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2470, 0.2435, 0.2616)
 
-4. Transformer:
+4. Transformer: **DONE**
     - PRR
 
 5. Encoder:
     - Droppath
+    - dpr in Transformer
 
 6. VisionTransformer:
     - revoir forward

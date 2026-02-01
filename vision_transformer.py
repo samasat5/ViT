@@ -29,6 +29,7 @@ class VisionTransformer(nn.Module): # paper_relevant_code/vision_transformer.py
     ) -> None:
 
         super().__init__()
+        self.task = task
 
         self.embedding = Embedding(
             image_size, patch_size, in_channels,

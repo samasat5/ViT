@@ -105,6 +105,7 @@ class Transformer(nn.Module): # ajouter PRR
         
         super().__init__()
         self.locat = locat
+        # add dpr here
         self.layers = nn.ModuleList([
             Encoder(
                 grid_size, dim_embed, dim_mlp, 
@@ -113,7 +114,13 @@ class Transformer(nn.Module): # ajouter PRR
             for _ in range(num_transformer)
         ])
         self.norm = nn.LayerNorm(dim_embed)
-        # self.prr = 
+
+        # PRR : bloc de raffinnement positionnel
+        self.num_head = num_head
+        self.pre_norm, self.post_norm = nn.Identity(), nn.Identity()
+        # nn.Identity in PyTorch is a layer that simply returns the input as output 
+        # without any changes. It is often used in neural networks to create skip 
+        # connections or as a placeholder in model architectures.
         
     def forward(self, x):
         all_attention_probs = []
@@ -122,4 +129,16 @@ class Transformer(nn.Module): # ajouter PRR
             all_attention_probs.append(attn_probs) # list of length num_transformer, each element shape: (batch_size, num_head, seq_len, seq_len)
         # if not self.locat: all_attention_probs = torch.stack(all_attention_probs, dim=1) # (batch_size, num_transformer, num_head, seq_len, seq_len
         x = self.norm(x)
+        # PRR
+        if self.locat: 
+            x = self.pre_norm(x)
+            B, N, C = x.shape
+            x = x.view(B, N, self.num_head, -1).permute(0, 2, 1, 3)
+            x = F.scaled_dot_product_attention(
+                query=x, key=x, value=x,
+            )
+            x = x.permute(0, 2, 1, 3).flatten(2, 3)
+            x = self.post_norm(x)
+            x = x.reshape((B, N, C))
+
         return x, all_attention_probs # (batch_size, seq_len, dim_embed), (batch_size, num_transformer, num_head, seq_len, seq_len)
