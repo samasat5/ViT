@@ -4,7 +4,7 @@
     - Best practice : pré-calculer la partie géométrique (distances) une seule fois et la stocker comme buffer :
     register_buffer("distances", ...) (et ça suit automatiquement .to(device) !)
 
-2. Train : 
+2. Train : **DONE**
     - Si tu utilises pin_memory=True dans DataLoader, tu peux accélérer les copies CPU->GPU :
     train_loader = DataLoader(..., pin_memory=True)
     ...
@@ -19,12 +19,12 @@
 4. Transformer: **DONE**
     - PRR
 
-5. Encoder:
+5. Encoder: **DONE**
     - Droppath
     - dpr in Transformer
 
 6. VisionTransformer:
-    - revoir forward
+    - revoir forward (propagate_grid_size????)
 
 ### locat + classif = OK
 ### classif = OK

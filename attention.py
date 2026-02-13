@@ -139,6 +139,7 @@ class MultiHeadAttention(nn.Module):
             grid_size, dim_embed, num_head, 
             dropout_rate, bias, locat, task,
         ) 
+        self.dropout = nn.Dropout(dropout_rate)
         self.out = nn.Linear(dim_embed, dim_embed) 
         self.dropout = nn.Dropout(dropout_rate)
 

@@ -54,6 +54,18 @@ class Norm(nn.Module): # ????
         return self.gamma * x + self.beta
 
 
+def drop_path(x, drop_prob: float = 0., training: bool = False):
+    if drop_prob == 0. or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    
+    # masque par sample
+    batch_size = x.shape[0]
+    mask = torch.rand(batch_size, 1, 1, device=x.device) < keep_prob
+    mask = mask.to(x.dtype)
+
+    return x * mask / keep_prob
+
 class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transformer.py
 
     def __init__(
@@ -63,6 +75,7 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
         dim_mlp: int, 
         num_head: int, 
         dropout_rate: float, 
+        drop_path_rate: float = 0.,
         bias: bool = False, 
         locat: bool = True,
         task: str = "classif",
@@ -75,16 +88,23 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
             dropout_rate, bias, locat, task,
         )
         # droppath
+        self.drop_path_rate = drop_path_rate
         self.norm2 = Norm(dim_embed)
         self.mlp = MLP(dim_embed, dim_mlp, dropout_rate)
 
     def forward(self, x):
         norm1 = self.norm1(x)
         attn_out, attn_probs = self.attn(norm1) # (batch_size, seq_len, dim_embed), (batch_size, num_head, seq_len, seq_len)
-        x = x + attn_out # (batch_size, seq_len, dim_embed)
+        
+        # DropPath sur la branche d'attention
+        x = x + drop_path(attn_out, self.drop_path_rate, self.training) # (batch_size, seq_len, dim_embed)
+
         norm2 = self.norm2(x)
         mlp_out = self.mlp(norm2) # (batch_size, seq_len, dim_embed)
-        out = x + mlp_out
+        
+        # DropPath sur la branche MLP
+        out = x + drop_path(mlp_out, self.drop_path_rate, self.training) # (batch_size, seq_len, dim_embed)
+
         return out, attn_probs # (batch_size, seq_len, dim_embed), (batch_size, num_head, seq_len, seq_len)
 
 
@@ -97,7 +117,8 @@ class Transformer(nn.Module): # ajouter PRR
         dim_mlp: int,
         num_head: int,  
         num_transformer: int, 
-        dropout_rate: float,         
+        dropout_rate: float,   
+        drop_path_rate: float = 0.,      
         bias: bool = False, 
         locat: bool = False,
         task: str = "classif",
@@ -105,13 +126,13 @@ class Transformer(nn.Module): # ajouter PRR
         
         super().__init__()
         self.locat = locat
-        # add dpr here
+        drop_path_encoder = torch.linspace(0, drop_path_rate, num_transformer).tolist()
         self.layers = nn.ModuleList([
             Encoder(
                 grid_size, dim_embed, dim_mlp, 
-                num_head, dropout_rate, bias, locat, task,
+                num_head, dropout_rate, drop_path_encoder[i], bias, locat, task,
             )
-            for _ in range(num_transformer)
+            for i in range(num_transformer)
         ])
         self.norm = nn.LayerNorm(dim_embed)
 

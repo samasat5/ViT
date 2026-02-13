@@ -22,7 +22,8 @@ class VisionTransformer(nn.Module): # paper_relevant_code/vision_transformer.py
         num_head: int = 12,
         num_transformer: int = 12, 
         num_classes: int = 0, 
-        dropout_rate: int = 0, 
+        dropout_rate: float = 0., 
+        drop_path_rate: float = 0.,
         bias: bool = False, 
         locat: bool = False,
         task: str = 'classif', # classif or seg
@@ -40,7 +41,7 @@ class VisionTransformer(nn.Module): # paper_relevant_code/vision_transformer.py
         self.encoder = Transformer(
             grid_size, dim_embed, dim_mlp,
             num_head, num_transformer, dropout_rate,  
-            bias, locat, task,
+            drop_path_rate, bias, locat, task,
         )
         
         self.head = nn.Linear(dim_embed, num_classes)
