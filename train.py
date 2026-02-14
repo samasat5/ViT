@@ -1,6 +1,7 @@
 import os
 import copy
 from tqdm import tqdm
+import argparse
 
 import torch
 import torch.nn as nn
@@ -8,12 +9,8 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
 from vision_transformer import VisionTransformer
-import random, numpy as np
-import matplotlib.pyplot as plt
-import argparse
-
+from utils import seed_everything, OxfordSegWrapper 
 from config import CONFIG
-from utils import plot_curves, seed_everything
 
 
 def train(
@@ -178,9 +175,6 @@ def train(
     return early_stopping_epoch, train_loss_all, val_loss_all, train_metric_all, val_metric_all
 
 
-# --------------------------
-# Test
-# --------------------------
 @torch.no_grad()
 def test(model, criterion, metric_fn, testing_dataloader, device, pin_memory):
     model.eval()
@@ -210,11 +204,9 @@ def test(model, criterion, metric_fn, testing_dataloader, device, pin_memory):
     return test_acc, test_loss
 
 
-# --------------------------
-# Main
-# --------------------------
 def main(
     seed,
+    task,
     dataset,
     model,
     metric_fn,
@@ -224,11 +216,13 @@ def main(
     pin_memory,
     num_epochs, 
     batch_size, 
+    image_size,
     val_size,
     num_workers,
     mean_dataset,
     std_dataset,
     best_weights_path,
+    classif_weights,
     checkpoint_path,
     patience,
     min_delta,
@@ -237,29 +231,46 @@ def main(
 ):
     
     gen = seed_everything(seed)
-    # Transforms
-    train_tf = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean_dataset, std_dataset),
-    ])
-    eval_tf = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean_dataset, std_dataset),
-    ])
 
-    DatasetClass = datasets.CIFAR100 if dataset == "cifar100" else datasets.CIFAR10
-    full_train = DatasetClass(root="./data", train=True, download=True, transform=train_tf)
-    test_set = DatasetClass(root="./data", train=False, download=True, transform=eval_tf)
+    if task == "classif":
+        train_tf = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean_dataset, std_dataset),
+        ])
+        eval_tf = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean_dataset, std_dataset),
+        ])
+        DatasetClass = datasets.CIFAR100 if dataset == "cifar100" else datasets.CIFAR10
+        full_train = DatasetClass(root="./data", train=True, download=True, transform=train_tf)
+        test_set = DatasetClass(root="./data", train=False, download=True, transform=eval_tf)
 
-    # Split train/val
-    train_size = len(full_train) - val_size
-    val_size = val_size
-    train_set, val_set = random_split(full_train, [train_size, val_size], generator=gen)
+        # Split train/val
+        train_size = len(full_train) - val_size
+        train_set, val_set = random_split(full_train, [train_size, val_size], generator=gen)
 
-    # Val sans augmentation
-    val_set.dataset.transform = eval_tf
+        # Val sans augmentation
+        val_set.dataset.transform = eval_tf
+        
+
+    if task == "seg":
+        best_checkpoint = torch.load(classif_weights, map_location=device)
+        missing, unexpected = model.load_state_dict(best_checkpoint, strict=False) # strict=False: charge tout ce qui correspond et ignore le reste
+        print("Missing:", missing)
+        print("Unexpected:", unexpected)
+
+        N = len(datasets.OxfordIIITPet(root="./data", split="trainval", target_types="segmentation", download=True))
+        all_idx = list(range(N))
+
+        train_size = N - val_size
+        train_idx, val_idx = random_split(all_idx, [train_size, val_size], generator=gen)
+
+        train_set = OxfordSegWrapper("./data", "trainval", image_size, mean_dataset, std_dataset, train_aug=True,  indices=train_idx.indices)
+        val_set = OxfordSegWrapper("./data", "trainval", image_size, mean_dataset, std_dataset, train_aug=False, indices=val_idx.indices)
+        test_set = OxfordSegWrapper("./data", "test", image_size, mean_dataset, std_dataset, train_aug=False)
+
 
     train_loader = DataLoader(
         train_set, batch_size=batch_size, shuffle=True,
@@ -321,7 +332,7 @@ if __name__ == "__main__":
         default="classif",
         help="Task à réaliser: 'classif' pour classification ou 'seg' pour segmentation"
     )
-    parser.add_argument("--locat", action="store_true", help="Activer LoCAT")
+    parser.add_argument("--locat", action="store_true", help="Activer LocAT")
     parser.add_argument(
         "--dataset",
         type=str,
@@ -340,6 +351,7 @@ if __name__ == "__main__":
     LOCAT = args.locat
     DATASET = args.dataset
     SEED = args.seed
+    if TASK == "seg": DATASET = "oxford"
 
     CHANNELS = CONFIG["channels"]
     DROPOUT_RATE = CONFIG["dropout"]
@@ -348,14 +360,14 @@ if __name__ == "__main__":
     DEVICE = CONFIG["device"]
     PIN_MEMORY = CONFIG["pin_memory"]
     NUM_WORKERS = CONFIG["num_workers"]
+    DIM_EMBED = CONFIG["dim_embed"]
+    DIM_MLP = CONFIG["dim_mlp"]
+    NUM_HEAD = CONFIG["num_heads"]
+    NUM_TRANSFORMER = CONFIG["num_transformer"]
 
     IMAGE_SIZE = CONFIG[TASK]["image_size"]
     PATCH_SIZE = CONFIG[TASK]["patch_size"]
-    DIM_EMBED = CONFIG[TASK]["dim_embed"]
-    DIM_MLP = CONFIG[TASK]["dim_mlp"]
-    NUM_HEAD = CONFIG[TASK]["num_heads"]
-    NUM_TRANSFORMER = CONFIG[TASK]["num_transformer"]
-    
+
     NUM_EPOCHS = CONFIG[TASK]["epochs"]
     LEARNING_RATE = CONFIG[TASK]["lr"]
     WEIGHT_DECAY = CONFIG[TASK]["weight_decay"]
@@ -367,7 +379,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(BEST_WEIGHTS_PATH), exist_ok=True)
     CHECKPOINT_PATH = f"{CONFIG[TASK]['checkpoint_path'][1 if LOCAT else 0]}_{SEED}.pth"
     os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
-    METRIC_FN = CONFIG[TASK]["accuracy"]
+    METRIC_FN = CONFIG[TASK]["metric"]
 
     DATASET_MEAN = CONFIG[DATASET]["mean"]
     DATASET_STD = CONFIG[DATASET]["std"]
@@ -405,6 +417,7 @@ if __name__ == "__main__":
 
     results = main(
         seed=SEED,
+        task=TASK,
         dataset=DATASET,
         model=model, 
         metric_fn=METRIC_FN,
@@ -416,10 +429,12 @@ if __name__ == "__main__":
         num_epochs=NUM_EPOCHS, 
         batch_size=BATCH_SIZE, 
         val_size=VAL_SIZE,
+        image_size=IMAGE_SIZE,
         num_workers=NUM_WORKERS,
         mean_dataset=DATASET_MEAN,
         std_dataset=DATASET_STD,
         best_weights_path=BEST_WEIGHTS_PATH,
+        classif_weights=f"{CONFIG['classif']['best_weights_path'][1 if LOCAT else 0]}_{SEED}.pth",
         checkpoint_path=CHECKPOINT_PATH,
         patience=PATIENCE_INIT,
         min_delta=MIN_DELTA,
