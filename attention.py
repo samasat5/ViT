@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import nn
-from embed import Embedding
 
 
 class Attention(nn.Module): 
@@ -24,7 +23,6 @@ class Attention(nn.Module):
         self.num_head = num_head
         self.dim_embed = dim_embed
         self.dim_head = dim_embed // num_head
-        self.scale = math.sqrt(self.dim_head)
         self.task = task
         self.num_prefix_tokens = 1 if task == "classif" else 0
         assert dim_embed % num_head == 0
@@ -34,12 +32,22 @@ class Attention(nn.Module):
         self.k = nn.Linear(dim_embed, dim_embed, bias=bias)
 
         if locat:
-            self.grid_size = grid_size
             self.w_var = nn.Linear(self.dim_head, 2)
             self.w_alpha = nn.Linear(self.dim_head, 1)
 
+            # register buffer pour les coordonnées des patches, grid_size fixe=> distances fixe
+            self.x_grid, self.y_grid = grid_size
+            pixels = torch.stack(
+                torch.meshgrid(
+                    torch.arange(self.x_grid),
+                    torch.arange(self.y_grid),
+                    indexing="ij",
+                ),
+                dim=-1)
+            diff = pixels.unsqueeze(0).unsqueeze(1) - pixels.unsqueeze(2).unsqueeze(3) # (n0, n1, n0, n1, 2)
+            self.register_buffer("diff", diff.pow(2), persistent=False)  # (N,N,2)
+
         self.dropout = nn.Dropout(dropout_rate) # attention dropout vs projection dropout?
-        # self.register_buffer("distances", precomputed_distances)  # shape (1,1,N,N,2) ???????? au lieu de calculer distances à chaque fois
 
     def forward(self, x): 
         B, N, E = x.shape # (B, N, E) => la forme canonique multihead : (B, H, N, Dh)
@@ -77,31 +85,25 @@ class Attention(nn.Module):
             """
             # 1.
             eps = 1e-6
-
+ 
             # 2. 
             q_loc = query[:, :, self.num_prefix_tokens:, :] # (B,H,N,Dh)
             var = F.softplus(self.w_var(q_loc)) + eps # (B,H,N,2)
             var = var.unsqueeze(3) # (B,H,N,1,2)
             alpha = F.softplus(self.w_alpha(q_loc)) # autocast?? B,H,N,1
 
-            # 3.
-            x_grid, y_grid = self.grid_size
-            pixels = torch.stack(
-                torch.meshgrid(
-                    torch.arange(x_grid, device=x.device),
-                    torch.arange(y_grid, device=x.device),
-                    indexing="ij",
-                ),
-                dim=-1
-            ).to(dtype=x.dtype)
-
-            diff = pixels.unsqueeze(0).unsqueeze(1) - pixels.unsqueeze(2).unsqueeze(3) # (n0, n1, n0, n1, 2)
-            distances = -0.5 * diff.pow(2) # .sum(dim=-1) = (n0, n1, n0, n1)
-            distances = distances.reshape(1, 1, x_grid * y_grid, x_grid * y_grid, 2) # B, H, N, N
+            # 3. mis dans le register buffer distances pour éviter de le recalculer à chaque forward
+            diff = self.diff.to(dtype=x.dtype) # from the register buffer
+            distances = -1/2 * diff # (n0, n1, n0, n1, 2)
+            N = self.x_grid * self.y_grid
+            distances = distances.reshape(1, 1, N, N, 2) # B, H, N, N
             
-            # 1, autocast???
+            # 1,
+            B, H, N, _ = alpha.shape
             gaussian = torch.exp((distances / (var + eps)).sum(dim=-1)) # B,H,N,N
             addition = alpha * gaussian # B,H,N,N
+            addition = addition.to(dtype=query.dtype, device=query.device)
+            assert addition.shape == (B, H, N, N)
 
             # 4. pad_beginning : segmentation -> rien et classif -> padding
             if self.num_prefix_tokens > 0: # classif
@@ -116,6 +118,7 @@ class Attention(nn.Module):
             dropout_p=self.dropout.p if self.training else 0.,
             attn_mask=addition,
         ) # (B, H, N, Dh)
+
         attention_prob = None
         x = x.transpose(1, 2).flatten(start_dim=2)
         return x, attention_prob
@@ -140,8 +143,7 @@ class MultiHeadAttention(nn.Module):
             dropout_rate, bias, locat, task,
         ) 
         self.dropout = nn.Dropout(dropout_rate)
-        self.out = nn.Linear(dim_embed, dim_embed) 
-        self.dropout = nn.Dropout(dropout_rate)
+        self.out = nn.Linear(dim_embed, dim_embed, bias=bias) 
 
     def forward(self, x):
         x, attn_prob = self.heads(x)

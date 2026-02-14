@@ -1,6 +1,6 @@
 # TODO
 
-1. Attention : 
+1. Attention : **DONE**
     - Best practice : pré-calculer la partie géométrique (distances) une seule fois et la stocker comme buffer :
     register_buffer("distances", ...) (et ça suit automatiquement .to(device) !)
 
@@ -23,7 +23,7 @@
     - Droppath
     - dpr in Transformer
 
-6. VisionTransformer:
+6. VisionTransformer: **DONE**
     - revoir forward (propagate_grid_size????)
 
 ### locat + classif = OK

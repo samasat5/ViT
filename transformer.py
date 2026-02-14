@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 from attention import MultiHeadAttention
 
-
-class MLP(nn.Module): # DONE, paper_relevant_code/vision_transformer.py
+ 
+class MLP(nn.Module): 
 
     def __init__(
         self, 
@@ -33,7 +33,7 @@ class MLP(nn.Module): # DONE, paper_relevant_code/vision_transformer.py
         return x
 
 
-class Norm(nn.Module): # ????
+class Norm(nn.Module): 
 
     def __init__(
         self, 
@@ -66,7 +66,7 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
 
     return x * mask / keep_prob
 
-class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transformer.py
+class Encoder(nn.Module): 
 
     def __init__(
         self, 
@@ -82,14 +82,14 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
     ) -> None:
         
         super().__init__()
-        self.norm1 = Norm(dim_embed)
+        self.norm1 = nn.LayerNorm(dim_embed)
         self.attn = MultiHeadAttention(
             grid_size, dim_embed, num_head, 
             dropout_rate, bias, locat, task,
         )
         # droppath
         self.drop_path_rate = drop_path_rate
-        self.norm2 = Norm(dim_embed)
+        self.norm2 = nn.LayerNorm(dim_embed)
         self.mlp = MLP(dim_embed, dim_mlp, dropout_rate)
 
     def forward(self, x):
@@ -108,7 +108,7 @@ class Encoder(nn.Module): # DONE, Block in paper_relevant_code/vision_transforme
         return out, attn_probs # (batch_size, seq_len, dim_embed), (batch_size, num_head, seq_len, seq_len)
 
 
-class Transformer(nn.Module): # ajouter PRR
+class Transformer(nn.Module): 
     
     def __init__(
         self,
