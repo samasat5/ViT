@@ -25,7 +25,7 @@ class MLP(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
-        x = self.denselayer(x) # shape: (batch, seq_len, dim_mlp)
+        x = self.denselayer(x)
         x = self.act(x) 
         x = self.dropout(x)
         x = self.outlayer(x)
@@ -48,8 +48,8 @@ class Norm(nn.Module):
         self.eps = eps
 
     def forward(self, x): 
-        mean = x.mean(-1, keepdim=True)  # x:(batch, seq_len, dim_embed);  mean: (batch, seq_len, 1)
-        std = x.std(-1, keepdim=True, unbiased=False) # unbiased=False : 1/N sum (xi - mean)^2 ; unbiased=True : 1/(N-1) sum (xi - mean)^2; false is consistent with LayerNorm
+        mean = x.mean(-1, keepdim=True) 
+        std = x.std(-1, keepdim=True, unbiased=False)
         x = (x - mean) / (torch.sqrt(std +  self.eps))
         return self.gamma * x + self.beta
 
@@ -59,7 +59,6 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
         return x
     keep_prob = 1 - drop_prob
     
-    # masque par sample
     batch_size = x.shape[0]
     mask = torch.rand(batch_size, 1, 1, device=x.device) < keep_prob
     mask = mask.to(x.dtype)
@@ -94,18 +93,14 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         norm1 = self.norm1(x)
-        attn_out, attn_probs = self.attn(norm1) # (batch_size, seq_len, dim_embed), (batch_size, num_head, seq_len, seq_len)
-        
-        # DropPath sur la branche d'attention
-        x = x + drop_path(attn_out, self.drop_path_rate, self.training) # (batch_size, seq_len, dim_embed)
+        attn_out, attn_probs = self.attn(norm1) 
+        x = x + drop_path(attn_out, self.drop_path_rate, self.training)
 
         norm2 = self.norm2(x)
-        mlp_out = self.mlp(norm2) # (batch_size, seq_len, dim_embed)
-        
-        # DropPath sur la branche MLP
-        out = x + drop_path(mlp_out, self.drop_path_rate, self.training) # (batch_size, seq_len, dim_embed)
+        mlp_out = self.mlp(norm2)
+        out = x + drop_path(mlp_out, self.drop_path_rate, self.training) 
 
-        return out, attn_probs # (batch_size, seq_len, dim_embed), (batch_size, num_head, seq_len, seq_len)
+        return out, attn_probs 
 
 
 class Transformer(nn.Module): 
@@ -136,21 +131,16 @@ class Transformer(nn.Module):
         ])
         self.norm = nn.LayerNorm(dim_embed)
 
-        # PRR : bloc de raffinnement positionnel
         self.num_head = num_head
         self.pre_norm, self.post_norm = nn.Identity(), nn.Identity()
-        # nn.Identity in PyTorch is a layer that simply returns the input as output 
-        # without any changes. It is often used in neural networks to create skip 
-        # connections or as a placeholder in model architectures.
         
     def forward(self, x):
         all_attention_probs = []
         for layer in self.layers:
             x, attn_probs = layer(x) 
-            all_attention_probs.append(attn_probs) # list of length num_transformer, each element shape: (batch_size, num_head, seq_len, seq_len)
-        # if not self.locat: all_attention_probs = torch.stack(all_attention_probs, dim=1) # (batch_size, num_transformer, num_head, seq_len, seq_len
+            all_attention_probs.append(attn_probs) 
         x = self.norm(x)
-        # PRR
+
         if self.locat: 
             x = self.pre_norm(x)
             B, N, C = x.shape
@@ -162,4 +152,4 @@ class Transformer(nn.Module):
             x = self.post_norm(x)
             x = x.reshape((B, N, C))
 
-        return x, all_attention_probs # (batch_size, seq_len, dim_embed), (batch_size, num_transformer, num_head, seq_len, seq_len)
+        return x, all_attention_probs

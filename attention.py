@@ -18,7 +18,7 @@ class Attention(nn.Module):
         task: str = "classif",
     ) -> None:
         
-        super().__init__() # patchedpositioned(x) shape: (batch_size, num_patches+1, dim_embed) = (batch, seq_len, dim_embed)
+        super().__init__()
         self.locat = locat
         self.num_head = num_head
         self.dim_embed = dim_embed
@@ -35,7 +35,6 @@ class Attention(nn.Module):
             self.w_var = nn.Linear(self.dim_head, 2)
             self.w_alpha = nn.Linear(self.dim_head, 1)
 
-            # register buffer pour les coordonnées des patches, grid_size fixe=> distances fixe
             self.x_grid, self.y_grid = grid_size
             pixels = torch.stack(
                 torch.meshgrid(
@@ -44,80 +43,50 @@ class Attention(nn.Module):
                     indexing="ij",
                 ),
                 dim=-1)
-            diff = pixels.unsqueeze(0).unsqueeze(1) - pixels.unsqueeze(2).unsqueeze(3) # (n0, n1, n0, n1, 2)
-            self.register_buffer("diff", diff.pow(2), persistent=False)  # (N,N,2)
+            diff = pixels.unsqueeze(0).unsqueeze(1) - pixels.unsqueeze(2).unsqueeze(3)
+            self.register_buffer("diff", diff.pow(2), persistent=False)  
 
-        self.dropout = nn.Dropout(dropout_rate) # attention dropout vs projection dropout?
+        self.dropout = nn.Dropout(dropout_rate) 
 
     def forward(self, x): 
-        B, N, E = x.shape # (B, N, E) => la forme canonique multihead : (B, H, N, Dh)
+        B, N, E = x.shape 
         assert E == self.dim_embed
 
-        # Le reshape sert à découper E en H morceaux de taille Dh(dim_head)
         value = self.v(x).reshape(B, N, self.num_head, self.dim_head).transpose(1, 2)
         key = self.k(x).reshape(B, N, self.num_head, self.dim_head).transpose(1, 2)
         query = self.q(x).reshape(B, N, self.num_head, self.dim_head).transpose(1, 2) 
 
         addition = None
         if self.locat:
-            """
-            1. addition_2d
-            2. get_var_and_alpha: 
-                    - var -> la variance σ² (contrôle la largeur spatiale de la Gaussian), 
-                    - alpha -> l’intensité du biais (combien la localité est favorisée)
-            3. gaussian_2d_nominator
-            4. pad_beginning : 
-                    Elle ajoute des lignes et colonnes au début de la 
-                    matrice d’attention pour gérer les tokens spéciaux 
-                    (ex: CLS), pas besoin pour la segmentation.
-
-            Simplifications:
-                - get_eps(fixe 1e-6/1e-4) et get_sigmoid_fn(F.softplus) doivent être remplacés par des variantes plus simples
-                - grid_size reste fixe donc pas de initial_grid_size et current_grid_size :
-                  Dans notre implémentation, la résolution spatiale des tokens est fixe ; 
-                  par conséquent, la grille spatiale est considérée constante et aucun 
-                  ajustement multi-résolution n’est appliqué.
-
-            Pour device: 
-                Tous les tenseurs intermédiaires sont créés dynamiquement sur le 
-                même dispositif que les données d’entrée, garantissant une exécution 
-                cohérente sur CPU ou GPU sans gestion explicite du dispositif dans les modules.
-            """
-            # 1.
             eps = 1e-6
- 
-            # 2. 
-            q_loc = query[:, :, self.num_prefix_tokens:, :] # (B,H,N,Dh)
-            var = F.softplus(self.w_var(q_loc)) + eps # (B,H,N,2)
-            var = var.unsqueeze(3) # (B,H,N,1,2)
-            alpha = F.softplus(self.w_alpha(q_loc)) # autocast?? B,H,N,1
+            q_loc = query[:, :, self.num_prefix_tokens:, :] 
+            var = F.softplus(self.w_var(q_loc)) + eps 
+            var = var.unsqueeze(3)
+            alpha = F.softplus(self.w_alpha(q_loc)) 
 
-            # 3. mis dans le register buffer distances pour éviter de le recalculer à chaque forward
-            diff = self.diff.to(dtype=x.dtype) # from the register buffer
-            distances = -1/2 * diff # (n0, n1, n0, n1, 2)
+            diff = self.diff.to(dtype=x.dtype)
+            distances = -1/2 * diff 
             N = self.x_grid * self.y_grid
-            distances = distances.reshape(1, 1, N, N, 2) # B, H, N, N
+            distances = distances.reshape(1, 1, N, N, 2) 
             
-            # 1,
             B, H, N, _ = alpha.shape
-            gaussian = torch.exp((distances / (var + eps)).sum(dim=-1)) # B,H,N,N
-            addition = alpha * gaussian # B,H,N,N
+            gaussian = torch.exp((distances / (var + eps)).sum(dim=-1)) 
+            addition = alpha * gaussian 
             addition = addition.to(dtype=query.dtype, device=query.device)
             assert addition.shape == (B, H, N, N)
 
-            # 4. pad_beginning : segmentation -> rien et classif -> padding
-            if self.num_prefix_tokens > 0: # classif
+            if self.num_prefix_tokens > 0: 
                 addition = F.pad(
                     addition, 
                     pad=(self.num_prefix_tokens, 0, self.num_prefix_tokens, 0), 
                     mode='constant',
-                ) # B,H,N+1,N+1
+                ) 
 
         x = F.scaled_dot_product_attention(
             query, key, value,
             dropout_p=self.dropout.p if self.training else 0.,
             attn_mask=addition,
-        ) # (B, H, N, Dh)
+        )
 
         attention_prob = None
         x = x.transpose(1, 2).flatten(start_dim=2)

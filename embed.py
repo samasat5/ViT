@@ -4,13 +4,7 @@ import torchvision.transforms as transforms
 from PIL import Image as PILImage
 import matplotlib.pyplot as plt            
 
-class Embedding(nn.Module): # Patch + Position Embedding 
-    """
-    Dans le cadre de la segmentation dense, 
-    aucun token CLS n’est introduit ; la séquence 
-    d’entrée du Transformer est constituée exclusivement 
-    de tokens spatiaux, chacun associé à un patch de l’image.
-    """
+class Embedding(nn.Module): 
     
     def __init__(
         self, 
@@ -19,7 +13,7 @@ class Embedding(nn.Module): # Patch + Position Embedding
         in_channels: int, 
         dim_embed: int, 
         dropout_rate: int = 0,
-        task: str = "classif", # classif or seg
+        task: str = "classif", 
     ) -> None:
         
         super().__init__()
@@ -42,7 +36,7 @@ class Embedding(nn.Module): # Patch + Position Embedding
             self.position_embedding = nn.Parameter(
                 torch.randn(1, 1 + N, dim_embed)
             )
-        else:  # segmentation
+        else: 
             self.cls_token = None
             self.position_embedding = nn.Parameter(
                 torch.randn(1, N, dim_embed)
@@ -66,39 +60,3 @@ class Embedding(nn.Module): # Patch + Position Embedding
         x = self.dropout(x) 
 
         return x
- 
-
-if __name__ == "__main__":
-
-    patch_size = 32
-    num_patches = (224 // patch_size) ** 2  
-    emb = Embedding(image_size=(224, 224), patch_size=(16,16), in_channels=3, dim_embed=128, task="seg")
-
-    # Load and preprocess the image
-    img = PILImage.open('louvre.jpg')  # Load the image
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
-    img_tensor = transform(img).unsqueeze(0)  # Shape: (1, 3, 224, 224); adding batch dimension
-    patched_img = emb.forward(img_tensor)   # shape: (1, 192, 128)
-    print("patched_image : ", patched_img.shape)
-    first_patch_img = img_tensor[0, :, 120:180, 60:120]
-
-    plt.figure(figsize=(12, 5))
-
-    # Before
-    plt.subplot(1, 2, 1)
-    plt.imshow(img_tensor[0].permute(1, 2, 0).numpy())
-    plt.title('Original Image')
-    plt.axis('off')
-
-    # After - show patch grid visualization
-    plt.subplot(1, 2, 2)
-    plt.imshow(first_patch_img.permute(1, 2, 0).numpy())
-    plt.title('Patch Grid Visualization')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-        
-    

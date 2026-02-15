@@ -5,14 +5,14 @@ import torchvision.transforms.functional as TF
 from torchvision import datasets
 
 
-def seed_everything(seed=42): # Et fais 3 seeds (42, 43, 44) pour moyenne/std.
+def seed_everything(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    gen = torch.Generator().manual_seed(seed) # for random_split
+    gen = torch.Generator().manual_seed(seed) 
     return gen
 
 
@@ -28,8 +28,6 @@ class OxfordSegWrapper(torch.utils.data.Dataset):
         self.mean = mean
         self.std = std
         self.train_aug = train_aug
-
-        # indices optionnels pour faire train/val sur le même split="trainval"
         self.indices = list(range(len(self.dataset))) if indices is None else list(indices)
 
     def __len__(self):
@@ -42,7 +40,7 @@ class OxfordSegWrapper(torch.utils.data.Dataset):
         img = TF.resize(img, self.image_size)
         mask = TF.resize(mask, self.image_size, interpolation=TF.InterpolationMode.NEAREST)
 
-        if self.train_aug: # on ne le fait pas en val ni en test
+        if self.train_aug: 
             if random.random() > 0.5:
                 img = TF.hflip(img)
                 mask = TF.hflip(mask)
@@ -64,8 +62,7 @@ def accuracy_from_logits(logits, labels):
 
 @torch.no_grad()
 def miou_multiclass(logits, targets, num_classes=3, ignore_index=None, eps=1e-6):
-    # logits: (B,C,H,W), targets: (B,H,W) in [0..C-1]
-    preds = logits.argmax(dim=1)  # (B,H,W)
+    preds = logits.argmax(dim=1) 
 
     ious = []
     for c in range(num_classes):
@@ -74,22 +71,17 @@ def miou_multiclass(logits, targets, num_classes=3, ignore_index=None, eps=1e-6)
         pred_c = (preds == c)
         targ_c = (targets == c)
 
-        inter = (pred_c & targ_c).sum(dim=(1,2)).float()   # (B,)
-        union = (pred_c | targ_c).sum(dim=(1,2)).float()   # (B,)
-        iou_c = (inter + eps) / (union + eps)              # (B,)
+        inter = (pred_c & targ_c).sum(dim=(1,2)).float()  
+        union = (pred_c | targ_c).sum(dim=(1,2)).float()                
 
-
-        # union is (B,) -> only keep samples where union>0
         valid = union > 0
         if valid.any():
             ious.append(((inter[valid] + eps) / (union[valid] + eps)))
 
-
     if len(ious) == 0:
         return 0.0
-    # return torch.stack(ious).mean().item()
-    return torch.cat(ious).mean().item()
 
+    return torch.cat(ious).mean().item()
 
 
 def plot_curves(train_losses, val_losses, train_accs, val_accs, save_prefix="training"):
@@ -130,9 +122,9 @@ def visualize_attention_once(model, loader, device, H_patches, W_patches, epoch,
         print("Skipping attention plot (no attention returned).")
         return
 
-    attn = attn_list[-1]          # last layer: [B, heads, T, T]
-    attn = attn[0].mean(dim=0)    # [T, T] avg heads
-    cls_to_patches = attn[0, 1:]  # CLS -> patches
+    attn = attn_list[-1] 
+    attn = attn[0].mean(dim=0)
+    cls_to_patches = attn[0, 1:] 
     heat = cls_to_patches.reshape(H_patches, W_patches).detach().cpu().numpy()
 
     plt.figure()
