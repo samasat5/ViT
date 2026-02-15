@@ -3,10 +3,10 @@ from torch import nn
 from utils import accuracy_from_logits, miou_multiclass
 
 CONFIG = {
-    "bias": True,
+    "bias": False,
     "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    "dropout": 0.1,
-    "drop_path": 0.1,
+    "dropout": 0.15,
+    "drop_path": 0.15,
     "pin_memory": True,
     "num_workers": 4,
     "channels": 3,
@@ -28,21 +28,21 @@ CONFIG = {
         "num_classes": 3,
     },
 
-    "dim_embed": 256,
-    "dim_mlp": 1024, # 4 * 128
-    "num_heads": 8,
-    "num_transformer": 8,
+    "dim_embed": 192  ,
+    "dim_mlp": 4*192  , # 4 * 192
+    "num_heads": 3,
+    "num_transformer": 12,
 
     "classif": {
 
-        "image_size": (32, 32),
-        "patch_size": (4, 4),
+        "image_size": (224, 224),
+        "patch_size": (16, 16),
         "val_size": 5000,
 
-        "lr": 3e-4,
+        "lr": 5e-4,
         "weight_decay": 0.05,
         "batch_size": 128, # si GPU OK, sinon 64
-        "epochs": 150,
+        "epochs": 600,
         "patience": 20,
         "min_delta": 1e-4,
 
@@ -54,15 +54,15 @@ CONFIG = {
 
     "seg": {
         
-        "image_size": (256, 256),
+        "image_size": (224, 224),
         "patch_size": (16, 16),
         "val_size": 500,
 
         "lr": 1e-4,
         "weight_decay": 0.01,
         "batch_size": 8,
-        "epochs": 100,
-        "patience": 20,
+        "epochs": 200,
+        "patience": 15,
         "min_delta": 1e-4,
 
         "criterion": nn.CrossEntropyLoss(),

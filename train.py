@@ -12,6 +12,11 @@ from vision_transformer import VisionTransformer
 from utils import seed_everything, OxfordSegWrapper 
 from config import CONFIG
 
+from torchvision import datasets
+
+ds = datasets.OxfordIIITPet(root="./data", split="trainval", target_types="segmentation", download=False)
+print(len(ds), ds[0][0].size, ds[0][1].size)
+
 
 def train(
     model,
@@ -65,9 +70,14 @@ def train(
     for ep in tqdm(range(start_epoch, num_epochs), leave=False):
         # ------------------ TRAIN ------------------
         model.train()
+        if hasattr(model, "task") and model.task == "seg":
+            model.embedding.eval()
+            model.encoder.eval()
+            model.seg_head.train()
+
         step = 0
         current_train_loss = 0.0
-        current_train_acc = 0.0
+        current_train_metric = 0.0
 
         for images, labels in train_loader:
             images = images.to(device, non_blocking=pin_memory)
@@ -80,24 +90,25 @@ def train(
             loss.backward()
 
             if grad_clip is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                params_to_clip = optimizer.param_groups[0]["params"]
+                torch.nn.utils.clip_grad_norm_(params_to_clip, grad_clip)
 
             optimizer.step()
 
-            acc = metric_fn(logits, labels)
+            metric = metric_fn(logits, labels)
 
             current_train_loss += loss.item()
-            current_train_acc += acc
+            current_train_metric += metric
             step += 1
 
         train_loss_all.append(current_train_loss / step)
-        train_metric_all.append(current_train_acc / step)
+        train_metric_all.append(current_train_metric / step)
 
         # ------------------ VAL ------------------
         model.eval()
         step = 0
         current_val_loss = 0.0
-        current_val_acc = 0.0
+        current_val_metric = 0.0
 
         with torch.no_grad():
             for images, labels in val_dataloader:
@@ -106,19 +117,19 @@ def train(
 
                 logits, _ = model(images)
                 loss = criterion(logits, labels)
-                acc = metric_fn(logits, labels)
+                metric = metric_fn(logits, labels)
 
                 current_val_loss += loss.item()
-                current_val_acc += acc
+                current_val_metric += metric
                 step += 1
 
         val_loss_all.append(current_val_loss / step)
-        val_metric_all.append(current_val_acc / step)
+        val_metric_all.append(current_val_metric / step)
 
         print("\n" + "#" * 50)
         print(
             f"[Epoch {ep+1}] "
-            f"Train Acc: {train_metric_all[-1]:.4f} | Val Acc: {val_metric_all[-1]:.4f} "
+            f"Train metric: {train_metric_all[-1]:.4f} | Val metric: {val_metric_all[-1]:.4f} "
             f"| Train Loss: {train_loss_all[-1]:.4f} | Val Loss: {val_loss_all[-1]:.4f}"
         )
 
@@ -180,7 +191,7 @@ def test(model, criterion, metric_fn, testing_dataloader, device, pin_memory):
     model.eval()
     step = 0
     current_test_loss = 0.0
-    current_test_acc = 0.0
+    current_test_metric = 0.0
 
     for images, labels in testing_dataloader:
         images = images.to(device, non_blocking=pin_memory)
@@ -188,20 +199,20 @@ def test(model, criterion, metric_fn, testing_dataloader, device, pin_memory):
 
         logits, _ = model(images)
         loss = criterion(logits, labels)
-        acc = metric_fn(logits, labels)
+        metric = metric_fn(logits, labels)
 
         current_test_loss += loss.item()
-        current_test_acc += acc
+        current_test_metric += metric
         step += 1
 
     test_loss = current_test_loss / step
-    test_acc = current_test_acc / step
+    test_metric = current_test_metric / step
 
     print("\n" + "#" * 50)
-    print(f"[Testing] Final Test Acc: {test_acc:.4f} | Test Loss: {test_loss:.4f}")
+    print(f"[Testing] Final Test metric: {test_metric:.4f} | Test Loss: {test_loss:.4f}")
     print("\n")
 
-    return test_acc, test_loss
+    return test_metric, test_loss
 
 
 def main(
@@ -211,7 +222,8 @@ def main(
     model,
     metric_fn,
     criterion,
-    optimizer,
+    lr, 
+    weight_decay,
     scheduler,
     pin_memory,
     num_epochs, 
@@ -233,13 +245,19 @@ def main(
     gen = seed_everything(seed)
 
     if task == "classif":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs) 
+
         train_tf = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
+            # transforms.RandomCrop(32, padding=4),
+            transforms.Resize((224, 224)),        
+            transforms.RandomCrop(224, padding=16),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean_dataset, std_dataset),
         ])
         eval_tf = transforms.Compose([
+            transforms.Resize((224, 224)),  
             transforms.ToTensor(),
             transforms.Normalize(mean_dataset, std_dataset),
         ])
@@ -254,14 +272,41 @@ def main(
         # Val sans augmentation
         val_set.dataset.transform = eval_tf
         
+        
 
     if task == "seg":
         best_checkpoint = torch.load(classif_weights, map_location=device)
-        missing, unexpected = model.load_state_dict(best_checkpoint, strict=False) # strict=False: charge tout ce qui correspond et ignore le reste
+        state = best_checkpoint
+
+        k = "embedding.position_embedding"
+        if k in state and state[k].shape[1] == model.state_dict()[k].shape[1] + 1:
+            # checkpoint has CLS, model doesn't -> drop first token
+            state[k] = state[k][:, 1:, :]
+            
+        missing, unexpected = model.load_state_dict(state, strict=False) # strict=False: charge tout ce qui correspond et ignore le reste
         print("Missing:", missing)
         print("Unexpected:", unexpected)
 
-        N = len(datasets.OxfordIIITPet(root="./data", split="trainval", target_types="segmentation", download=True))
+        # Freeze backbone (embedding + encoder)
+        for p in model.embedding.parameters():
+            p.requires_grad = False
+        for p in model.encoder.parameters():
+            p.requires_grad = False
+
+        # Head seg trainable
+        for p in model.seg_head.parameters():
+            p.requires_grad = True
+
+        optimizer = torch.optim.AdamW(
+            model.seg_head.parameters(),
+            lr=lr,
+            weight_decay=weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5, factor=0.5)
+
+
+
+        N = len(datasets.OxfordIIITPet(root="./data", split="trainval", target_types="segmentation", download=False))
         all_idx = list(range(N))
 
         train_size = N - val_size
@@ -285,7 +330,7 @@ def main(
         num_workers=num_workers, pin_memory=pin_memory
     )
 
-    early_ep, train_loss_all, val_loss_all, train_acc_all, val_acc_all = train(
+    early_ep, train_loss_all, val_loss_all, train_metric_all, val_metric_all = train(
         model=model,
         metric_fn=metric_fn,
         train_loader=train_loader,
@@ -308,18 +353,18 @@ def main(
     if os.path.exists(best_weights_path):
         model.load_state_dict(torch.load(best_weights_path, map_location=device))
 
-    test_acc, test_loss = test(model, criterion, metric_fn, test_loader, device=device, pin_memory=pin_memory)
+    test_metric, test_loss = test(model, criterion, metric_fn, test_loader, device=device, pin_memory=pin_memory)
 
     print(f"Done. Early stop epoch: {early_ep}")
-    print(f"Final Test Acc: {test_acc:.4f} | Final Test Loss: {test_loss:.4f}")
+    print(f"Final Test metric: {test_metric:.4f} | Final Test Loss: {test_loss:.4f}")
 
     return {
         "early_stopping_epoch": early_ep,
         "train_loss_all": train_loss_all,
         "val_loss_all": val_loss_all,
-        "train_acc_all": train_acc_all,
-        "val_acc_all": val_acc_all,
-        "test_acc": test_acc,
+        "train_metric_all": train_metric_all,
+        "val_metric_all": val_metric_all,
+        "test_metric": test_metric,
         "test_loss": test_loss,
     }
 
@@ -349,9 +394,11 @@ if __name__ == "__main__":
 
     TASK = args.task
     LOCAT = args.locat
-    DATASET = args.dataset
+    # DATASET = args.dataset
+    DATASET_CLASSIF = args.dataset
     SEED = args.seed
-    if TASK == "seg": DATASET = "oxford"
+    # if TASK == "seg": DATASET = "oxford"
+    DATASET = "oxford" if TASK == "seg" else DATASET_CLASSIF
 
     CHANNELS = CONFIG["channels"]
     DROPOUT_RATE = CONFIG["dropout"]
@@ -375,9 +422,9 @@ if __name__ == "__main__":
     PATIENCE_INIT = CONFIG[TASK]["patience"]
     MIN_DELTA = CONFIG[TASK]["min_delta"]
     BATCH_SIZE = CONFIG[TASK]["batch_size"]
-    BEST_WEIGHTS_PATH = f"{CONFIG[TASK]['best_weights_path'][1 if LOCAT else 0]}_{SEED}.pth"
+    BEST_WEIGHTS_PATH = f"{CONFIG[TASK]['best_weights_path'][1 if LOCAT else 0]}_{SEED}_{DATASET}.pth"
     os.makedirs(os.path.dirname(BEST_WEIGHTS_PATH), exist_ok=True)
-    CHECKPOINT_PATH = f"{CONFIG[TASK]['checkpoint_path'][1 if LOCAT else 0]}_{SEED}.pth"
+    CHECKPOINT_PATH = f"{CONFIG[TASK]['checkpoint_path'][1 if LOCAT else 0]}_{SEED}_{DATASET}.pth"
     os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
     METRIC_FN = CONFIG[TASK]["metric"]
 
@@ -412,9 +459,7 @@ if __name__ == "__main__":
         task=TASK,
     ).to(DEVICE)
     criterion = CONFIG[TASK]["criterion"]
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS) if TASK=="classif" else torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=5, factor=0.5)
-
+    
     results = main(
         seed=SEED,
         task=TASK,
@@ -422,8 +467,8 @@ if __name__ == "__main__":
         model=model, 
         metric_fn=METRIC_FN,
         criterion=criterion,
-        optimizer=optimizer,
-        scheduler=scheduler,
+        lr=LEARNING_RATE,
+        weight_decay=WEIGHT_DECAY,
         load_checkpoint=False,
         pin_memory=PIN_MEMORY,
         num_epochs=NUM_EPOCHS, 
@@ -434,7 +479,9 @@ if __name__ == "__main__":
         mean_dataset=DATASET_MEAN,
         std_dataset=DATASET_STD,
         best_weights_path=BEST_WEIGHTS_PATH,
-        classif_weights=f"{CONFIG['classif']['best_weights_path'][1 if LOCAT else 0]}_{SEED}.pth",
+        # classif_weights=f"{CONFIG['classif']['best_weights_path'][1 if LOCAT else 0]}_{SEED}_{DATASET}.pth",
+        classif_weights=f"{CONFIG['classif']['best_weights_path'][1 if LOCAT else 0]}_{SEED}_{DATASET_CLASSIF}.pth",
+
         checkpoint_path=CHECKPOINT_PATH,
         patience=PATIENCE_INIT,
         min_delta=MIN_DELTA,
@@ -443,5 +490,5 @@ if __name__ == "__main__":
 
     torch.save(
         results, 
-        f"training_{TASK}_locat_{SEED}.pth" if LOCAT else f"training_{TASK}_{SEED}.pth"
+        f"training_{TASK}_locat_{SEED}_{DATASET}.pth" if LOCAT else f"training_{TASK}_{SEED}_{DATASET}.pth"
     )

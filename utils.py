@@ -79,14 +79,17 @@ def miou_multiclass(logits, targets, num_classes=3, ignore_index=None, eps=1e-6)
         iou_c = (inter + eps) / (union + eps)              # (B,)
 
 
-        # si une classe n'apparait ni en pred ni en target, on peut l'ignorer
-        if union == 0:
-            continue
-        ious.append((inter + eps) / (union + eps))
+        # union is (B,) -> only keep samples where union>0
+        valid = union > 0
+        if valid.any():
+            ious.append(((inter[valid] + eps) / (union[valid] + eps)))
+
 
     if len(ious) == 0:
         return 0.0
-    return torch.stack(ious).mean().item()
+    # return torch.stack(ious).mean().item()
+    return torch.cat(ious).mean().item()
+
 
 
 def plot_curves(train_losses, val_losses, train_accs, val_accs, save_prefix="training"):
